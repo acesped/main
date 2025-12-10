@@ -1,5 +1,5 @@
 # .github/workflows/loto3.yml
-name: Actualizar Loto 3
+name: Loto Results
 
 on:
   schedule:

@@ -1,0 +1,311 @@
+# =======================================
+# INSTALACIÓN DE LIBRERÍAS
+# =======================================
+!pip install requests beautifulsoup4 pandas tensorflow scikit-learn gspread
+
+# =======================================
+# INTEGRACIÓN CON GOOGLE DRIVE
+# =======================================
+from google.colab import drive
+drive.mount('/content/drive')
+
+SERVICE_ACCOUNT_FILE = "/content/drive/My Drive/service_account/service_account.json"
+
+# =======================================
+# IMPORTS GENERALES
+# =======================================
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from datetime import datetime
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import (
+    LSTM, Dense, Embedding, Input, LayerNormalization,
+    Dropout, MultiHeadAttention, GlobalAveragePooling1D
+)
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+
+import gspread
+from google.oauth2.service_account import Credentials
+
+
+# =======================================
+# AUTORIZACIÓN GOOGLE SHEETS (Drive)
+# =======================================
+scope = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+creds = Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=scope
+)
+
+gc = gspread.authorize(creds)
+
+SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
+sh = gc.open_by_key(SPREADSHEET_ID)
+worksheet = sh.worksheet("results")
+
+
+# =======================================
+# DICCIONARIO DE MESES
+# =======================================
+MESES = {
+    "ene.": "01", "feb.": "02", "mar.": "03", "abr.": "04",
+    "may.": "05", "jun.": "06", "jul.": "07", "ago.": "08",
+    "sep.": "09", "oct.": "10", "nov.": "11", "dic.": "12",
+}
+
+def corregir_fecha(fecha_str):
+    for mes_abrev, mes_num in MESES.items():
+        if mes_abrev in fecha_str:
+            fecha_str = fecha_str.replace(mes_abrev, mes_num)
+            return datetime.strptime(fecha_str, "%d %m %Y")
+    raise ValueError(f"Mes no reconocido en fecha '{fecha_str}'")
+
+
+# =======================================
+# SCRAPING
+# =======================================
+def extraer_resultados_por_anio(anio):
+    url = f"https://www.loterias.com/loto-3/resultados/{anio}"
+    print(f"🔎 Procesando año {anio} - URL: {url}")
+
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+    except Exception:
+        print(f"❌ Error obteniendo datos del año {anio}")
+        return pd.DataFrame()
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    tabla = soup.find("table", class_="archives")
+
+    if not tabla:
+        print("❌ Tabla no encontrada")
+        return pd.DataFrame()
+
+    datos = []
+    for fila in tabla.tbody.find_all("tr"):
+        celdas = fila.find_all("td")
+        if len(celdas) < 2:
+            continue
+
+        enlace = celdas[0].find("a")
+        if not enlace:
+            continue
+
+        texto_fecha = enlace.get_text(separator=" ").strip()
+        partes = texto_fecha.split()
+
+        if len(partes) < 3:
+            continue
+
+        fecha_raw = " ".join(partes[1:])
+        try:
+            fecha = corregir_fecha(fecha_raw)
+        except Exception:
+            continue
+
+        listas = celdas[1].find_all("ul", class_="balls")
+        for lista in listas:
+            try:
+                tipo = lista.find("li").text.strip()
+                numeros = [li.text.strip() for li in lista.find_all("li", class_="ball")]
+                if len(numeros) != 3:
+                    continue
+
+                ultimo = int(numeros[2])
+                datos.append({
+                    "Fecha": fecha,
+                    "Turno": tipo,
+                    "Último Número": ultimo,
+                })
+            except:
+                pass
+
+    return pd.DataFrame(datos)
+
+
+# =======================================
+# PREPROCESAMIENTO
+# =======================================
+def preparar_datos_lstm(df, seq_length=10):
+    df = df.sort_values("Fecha").reset_index(drop=True)
+    numeros = df["Último Número"].values
+    X, y = [], []
+    for i in range(len(numeros) - seq_length):
+        X.append(numeros[i:i+seq_length])
+        y.append(numeros[i+seq_length])
+    return np.array(X), np.array(y)
+
+
+def codificar_one_hot(y, num_classes=10):
+    return to_categorical(y, num_classes=num_classes)
+
+
+# =======================================
+# MODELO LSTM
+# =======================================
+def crear_modelo_lstm(seq_length, num_classes=10):
+    model = Sequential([
+        Embedding(input_dim=num_classes, output_dim=32, input_length=seq_length),
+        LSTM(64),
+        Dense(num_classes, activation='softmax')
+    ])
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return model
+
+
+# =======================================
+# MODELO TRANSFORMER
+# =======================================
+def crear_modelo_transformer(seq_length, num_classes=10, embed_dim=32, heads=2, ff_dim=64, dropout=0.1):
+    inputs = Input(shape=(seq_length,), dtype="int32")
+    x = Embedding(num_classes, embed_dim)(inputs)
+
+    attn = MultiHeadAttention(num_heads=heads, key_dim=embed_dim)(x, x)
+    attn = Dropout(dropout)(attn)
+    out1 = LayerNormalization(epsilon=1e-6)(x + attn)
+
+    ff = Dense(ff_dim, activation="relu")(out1)
+    ff = Dense(embed_dim)(ff)
+    ff = Dropout(dropout)(ff)
+    out2 = LayerNormalization(epsilon=1e-6)(out1 + ff)
+
+    x = GlobalAveragePooling1D()(out2)
+    outputs = Dense(num_classes, activation="softmax")(x)
+
+    model = Model(inputs, outputs)
+    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
+
+    return model
+
+
+# =======================================
+# ENSAMBLE
+# =======================================
+def ensemble_predict(preds_list):
+    avg = np.mean(preds_list, axis=0)
+    return np.argmax(avg, axis=1), np.max(avg, axis=1)
+
+
+# =======================================
+# MONTE CARLO
+# =======================================
+def simulacion_monte_carlo_fast(modelos, entrada, num_simulaciones=5000, tipo='ensemble'):
+    if tipo == 'lstm':
+        probs = modelos[0].predict(entrada, verbose=0)[0]
+    elif tipo == 'transformer':
+        probs = modelos[0].predict(entrada, verbose=0)[0]
+    else:
+        p1 = modelos[0].predict(entrada, verbose=0)[0]
+        p2 = modelos[1].predict(entrada, verbose=0)[0]
+        probs = (p1 + p2) / 2
+
+    return np.random.choice(np.arange(10), size=num_simulaciones, p=probs)
+
+
+# =======================================
+# MAIN
+# =======================================
+if __name__ == "__main__":
+
+    año_actual = datetime.now().year
+    años = list(range(año_actual, año_actual - 10, -1))
+
+    resultados = pd.DataFrame()
+    for anio in años:
+        df = extraer_resultados_por_anio(anio)
+        if not df.empty:
+            resultados = pd.concat([resultados, df], ignore_index=True)
+
+    print(f"\n🔔 Total resultados extraídos: {len(resultados)}")
+
+    seq_length = 10
+    X, y = preparar_datos_lstm(resultados, seq_length)
+    num_classes = 10
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    y_train_cat = codificar_one_hot(y_train)
+    y_test_cat = codificar_one_hot(y_test)
+
+    es = EarlyStopping(patience=5, restore_best_weights=True, monitor='val_loss')
+
+    # LSTM
+    print("\n⚙️ Entrenando LSTM...")
+    modelo_lstm = crear_modelo_lstm(seq_length)
+    modelo_lstm.fit(X_train, y_train_cat, epochs=50, batch_size=64,
+                    validation_data=(X_test, y_test_cat), verbose=0, callbacks=[es])
+
+    # TRANSFORMER
+    print("\n⚙️ Entrenando Transformer...")
+    modelo_trans = crear_modelo_transformer(seq_length)
+    modelo_trans.fit(X_train, y_train_cat, epochs=50, batch_size=64,
+                     validation_data=(X_test, y_test_cat), verbose=0, callbacks=[es])
+
+    # =======================================
+    # PREDICCIONES
+    # =======================================
+    ultima_seq = resultados.sort_values("Fecha")["Último Número"].values[-seq_length:]
+    entrada = np.array([ultima_seq])
+
+    p_lstm = modelo_lstm.predict(entrada, verbose=0)
+    p_trans = modelo_trans.predict(entrada, verbose=0)
+
+    pred_clase, pred_prob = ensemble_predict([p_lstm, p_trans])
+
+    # MONTE CARLO
+    resultados_mc = simulacion_monte_carlo_fast([modelo_lstm, modelo_trans], entrada, 5000, tipo='ensemble')
+    conteo = pd.Series(resultados_mc).value_counts().sort_index()
+    num_max = conteo.idxmax()
+    prob_mc = conteo.max() / 5000.0
+
+    # =======================================
+    # IMPRESIÓN DETALLADA
+    # =======================================
+    print("\n=======================")
+    print("🔮  RESULTADOS DEL MODELO")
+    print("=======================\n")
+
+    print("📌 LSTM")
+    print(f"  • Número predicho: {int(np.argmax(p_lstm))}")
+    print(f"  • Probabilidad: {float(np.max(p_lstm)):.4f}\n")
+
+    print("📌 Transformer")
+    print(f"  • Número predicho: {int(np.argmax(p_trans))}")
+    print(f"  • Probabilidad: {float(np.max(p_trans)):.4f}\n")
+
+    print("📌 Ensamble (LSTM + Transformer)")
+    print(f"  • Predicción final: {int(pred_clase[0])}")
+    print(f"  • Probabilidad combinada: {float(pred_prob[0]):.4f}\n")
+
+    print("📌 Monte Carlo (5000 simulaciones)")
+    print(f"  • Número más frecuente: {num_max}")
+    print(f"  • Probabilidad estimada: {prob_mc:.4f}\n")
+
+    # =======================================
+    # APPEND A GOOGLE SHEETS
+    # =======================================
+    print("📤 Enviando resultados a Google Sheets...")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    fila = [
+        timestamp,
+        int(np.argmax(p_lstm)), float(np.max(p_lstm)),
+        int(np.argmax(p_trans)), float(np.max(p_trans)),
+        int(pred_clase[0]), float(pred_prob[0]),
+        int(num_max), float(prob_mc)
+    ]
+
+    worksheet.append_row(fila, value_input_option="USER_ENTERED")
+
+    print("✅ Google Sheets actualizado correctamente.")

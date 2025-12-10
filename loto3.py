@@ -89,15 +89,16 @@ def obtener_ultimo_sorteo(anio):
 # FUNCIONES GOOGLE SHEETS
 # =======================================
 def append_ultimo_sorteo(worksheet, fecha, numeros):
-    # Revisar si ya existe la fecha en la hoja
+    # Revisar si ya existe la misma fecha y hora en la hoja
     registros = worksheet.get_all_records()
+    fecha_str = fecha.strftime("%Y-%m-%d %H:%M:%S")
     for fila in registros:
-        if fila.get("Fecha") == fecha.strftime("%Y-%m-%d"):
+        if fila.get("Fecha") == fecha_str:
             print("⚠️ Sorteo ya registrado. No se agrega fila duplicada.")
             return
-    # Agregar nueva fila
+    # Agregar nueva fila con fecha y hora
     fila = [
-        fecha.strftime("%Y-%m-%d"),
+        fecha_str,
         numeros[0],
         numeros[1],
         numeros[2]
@@ -112,7 +113,7 @@ if __name__ == "__main__":
     anio_actual = datetime.now().year
 
     fecha, numeros = obtener_ultimo_sorteo(anio=anio_actual)
-    print("Últimos números obtenidos:", numeros, "Fecha:", fecha.strftime("%Y-%m-%d"))
+    print("Últimos números obtenidos:", numeros, "Fecha y hora:", fecha.strftime("%Y-%m-%d %H:%M:%S"))
 
     gc = cargar_credenciales_google()
     SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"

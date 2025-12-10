@@ -1,5 +1,5 @@
 # =======================================
-# IMPORTS GENERALES
+# IMPORTS
 # =======================================
 import os
 import json
@@ -10,7 +10,29 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # =======================================
-# DICCIONARIO MESES
+# GOOGLE SHEETS
+# =======================================
+def cargar_credenciales_google():
+    print("🔐 Cargando credenciales desde GOOGLE_CREDENTIALS...")
+    creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+    )
+    return gspread.authorize(creds)
+
+# ID del spreadsheet y hoja
+SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
+SHEET_NAME = "loto3"
+
+gc = cargar_credenciales_google()
+worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+# =======================================
+# SCRAPING ÚLTIMO SORTEO
 # =======================================
 MESES = {
     "ene.": "01", "feb.": "02", "mar.": "03", "abr.": "04",
@@ -25,98 +47,68 @@ def corregir_fecha(fecha_str):
             return datetime.strptime(fecha_str, "%d %m %Y")
     raise ValueError(f"Mes no reconocido en fecha '{fecha_str}'")
 
-# =======================================
-# AUTORIZACIÓN GOOGLE SHEETS
-# =======================================
-def cargar_credenciales_google():
-    print("🔐 Cargando credenciales desde GOOGLE_CREDENTIALS...")
-    creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-    creds = Credentials.from_service_account_info(
-        creds_dict,
-        scopes=[
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-    )
-    return gspread.authorize(creds)
+def obtener_ultimo_sorteo():
+    año_actual = datetime.now().year
+    url = f"https://www.loterias.com/loto-3/resultados/{año_actual}"
+    print(f"🔎 Obteniendo últimos números del Loto 3 del año {año_actual}...")
 
-# =======================================
-# SCRAPING
-# =======================================
-def obtener_ultimo_sorteo(anio):
-    url = f"https://www.loterias.com/loto-3/resultados/{anio}"
-    print(f"🔎 Obteniendo últimos números del Loto 3 del año {anio}...")
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-    except:
-        raise ConnectionError(f"No se pudo acceder a {url}")
-
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
+
     tabla = soup.find("table", class_="archives")
     if not tabla:
         raise ValueError("No se encontró la tabla de resultados en la web")
 
-    # Buscamos la primera fila válida (último sorteo)
-    for fila in tabla.tbody.find_all("tr"):
-        celdas = fila.find_all("td")
-        if len(celdas) < 2:
-            continue
-        enlace = celdas[0].find("a")
-        if not enlace:
-            continue
-        texto_fecha = enlace.get_text(separator=" ").strip()
-        partes = texto_fecha.split()
-        if len(partes) < 3:
-            continue
-        fecha_raw = " ".join(partes[1:])
-        try:
-            fecha = corregir_fecha(fecha_raw)
-        except:
-            continue
-        lista = celdas[1].find("ul", class_="balls")
-        if not lista:
-            continue
-        numeros = [li.text.strip() for li in lista.find_all("li", class_="ball")]
-        if len(numeros) != 3:
-            continue
-        numeros = [int(n) for n in numeros]
-        return fecha, numeros
+    # Tomamos la primera fila disponible
+    fila = tabla.tbody.find("tr")
+    if not fila:
+        raise ValueError("No se encontraron sorteos en la tabla")
 
-    raise ValueError("No se pudieron extraer los 3 números del sorteo")
+    celdas = fila.find_all("td")
+    if len(celdas) < 2:
+        raise ValueError("Formato de fila inesperado")
+
+    # Fecha
+    enlace = celdas[0].find("a")
+    texto_fecha = enlace.get_text(separator=" ").strip()
+    partes = texto_fecha.split()
+    fecha_raw = " ".join(partes[1:])
+    fecha = corregir_fecha(fecha_raw)
+
+    # Números
+    lista = celdas[1].find("ul", class_="balls")
+    if not lista:
+        raise ValueError("No se encontró la lista de números")
+    numeros = [int(li.text.strip()) for li in lista.find_all("li", class_="ball")]
+    if len(numeros) != 3:
+        raise ValueError("No se pudieron extraer los 3 números del sorteo")
+
+    return fecha, numeros
 
 # =======================================
-# FUNCIONES GOOGLE SHEETS
+# APPEND A GOOGLE SHEETS
 # =======================================
-def append_ultimo_sorteo(worksheet, fecha, numeros):
-    # Revisar si ya existe la misma fecha y hora en la hoja
-    registros = worksheet.get_all_records()
-    fecha_str = fecha.strftime("%Y-%m-%d %H:%M:%S")
+def append_ultimo_sorteo(worksheet, fecha_sorteo, numeros):
+    # Fecha y hora de ejecución
+    fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Leemos registros existentes
+    registros = worksheet.get_all_records(expected_headers=["FechaHora","Num1","Num2","Num3"])
     for fila in registros:
-        if fila.get("Fecha") == fecha_str:
-            print("⚠️ Sorteo ya registrado. No se agrega fila duplicada.")
+        if fila.get("FechaHora") == fecha_hora:
+            print("⚠️ Sorteo ya registrado en esta hora.")
             return
-    # Agregar nueva fila con fecha y hora
-    fila = [
-        fecha_str,
-        numeros[0],
-        numeros[1],
-        numeros[2]
-    ]
+
+    # Agregamos nueva fila: columna A = fecha/hora de ejecución, columnas B-D = números
+    fila = [fecha_hora, numeros[0], numeros[1], numeros[2]]
     worksheet.append_row(fila, value_input_option="USER_ENTERED")
-    print("✅ Sorteo agregado correctamente:", fila)
+    print("✅ Últimos números obtenidos:", numeros, "Fecha/hora:", fecha_hora)
 
 # =======================================
 # MAIN
 # =======================================
 if __name__ == "__main__":
-    anio_actual = datetime.now().year
-
-    fecha, numeros = obtener_ultimo_sorteo(anio=anio_actual)
-    print("Últimos números obtenidos:", numeros, "Fecha y hora:", fecha.strftime("%Y-%m-%d %H:%M:%S"))
-
-    gc = cargar_credenciales_google()
-    SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
-    worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet("loto3")
-
+    print("🔎 Obteniendo últimos números del Loto 3...")
+    fecha, numeros = obtener_ultimo_sorteo()
     append_ultimo_sorteo(worksheet, fecha, numeros)

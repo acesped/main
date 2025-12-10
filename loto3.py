@@ -25,10 +25,7 @@ def cargar_credenciales_google():
     return gspread.authorize(creds)
 
 SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
-SHEET_NAME = "loto3"
-
 gc = cargar_credenciales_google()
-worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
 
 # =======================================
 # SCRAPING ÚLTIMO SORTEO
@@ -67,27 +64,31 @@ def obtener_ultimo_sorteo():
     if len(celdas) < 2:
         raise ValueError("Formato de fila inesperado")
 
+    # Fecha del sorteo
     enlace = celdas[0].find("a")
     texto_fecha = enlace.get_text(separator=" ").strip()
     partes = texto_fecha.split()
     fecha_raw = " ".join(partes[1:])
     fecha = corregir_fecha(fecha_raw)
 
-    lista = celdas[1].find("ul", class_="balls")
-    if not lista:
-        raise ValueError("No se encontró la lista de números")
-    numeros = [int(li.text.strip()) for li in lista.find_all("li", class_="ball")]
-    if len(numeros) != 3:
+    # Números de los sorteos: Día, Tarde, Noche
+    listas = celdas[1].find_all("ul", class_="balls")
+    if not listas or len(listas) < 3:
         raise ValueError("No se pudieron extraer los 3 números del sorteo")
 
-    return fecha, numeros
+    numeros_dia = [int(li.text.strip()) for li in listas[0].find_all("li", class_="ball")]
+    numeros_tarde = [int(li.text.strip()) for li in listas[1].find_all("li", class_="ball")]
+    numeros_noche = [int(li.text.strip()) for li in listas[2].find_all("li", class_="ball")]
+
+    return fecha, numeros_dia, numeros_tarde, numeros_noche
 
 # =======================================
 # APPEND A GOOGLE SHEETS
 # =======================================
-def append_ultimo_sorteo(worksheet, fecha_sorteo, numeros):
+def append_ultimo_sorteo(worksheet_name, numeros):
+    worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet(worksheet_name)
     fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     # Obtenemos todos los valores existentes
     registros = worksheet.get_all_values()
 
@@ -97,20 +98,22 @@ def append_ultimo_sorteo(worksheet, fecha_sorteo, numeros):
         registros = worksheet.get_all_values()
 
     # Evitamos duplicados comparando fecha/hora de ejecución
-    for fila in registros[1:]:  # saltamos encabezado
+    for fila in registros[1:]:
         if fila[0] == fecha_hora:
-            print("⚠️ Sorteo ya registrado en esta hora.")
+            print(f"⚠️ Sorteo ya registrado en {worksheet_name}.")
             return
 
-    # Append nueva fila
-    fila = [fecha_hora, numeros[0], numeros[1], numeros[2]]
+    fila = [fecha_hora] + numeros
     worksheet.append_row(fila, value_input_option="USER_ENTERED")
-    print("✅ Últimos números obtenidos:", numeros, "Fecha/hora:", fecha_hora)
+    print(f"✅ Últimos números obtenidos en {worksheet_name}:", numeros, "Fecha/hora:", fecha_hora)
 
 # =======================================
 # MAIN
 # =======================================
 if __name__ == "__main__":
     print("🔎 Obteniendo últimos números del Loto 3...")
-    fecha, numeros = obtener_ultimo_sorteo()
-    append_ultimo_sorteo(worksheet, fecha, numeros)
+    fecha, numeros_dia, numeros_tarde, numeros_noche = obtener_ultimo_sorteo()
+
+    append_ultimo_sorteo("loto3_dia", numeros_dia)
+    append_ultimo_sorteo("loto3_tarde", numeros_tarde)
+    append_ultimo_sorteo("loto3_noche", numeros_noche)

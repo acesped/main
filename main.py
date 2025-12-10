@@ -1,14 +1,8 @@
 # =======================================
-# INTEGRACIÓN CON GOOGLE DRIVE
-# =======================================
-from google.colab import drive
-drive.mount('/content/drive')
-
-SERVICE_ACCOUNT_FILE = "/content/drive/My Drive/service_account/service_account.json"
-
-# =======================================
 # IMPORTS GENERALES
 # =======================================
+import os
+import json
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -23,40 +17,46 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 
 # =======================================
-# AUTORIZACIÓN GOOGLE SHEETS (Drive)
+# AUTORIZACIÓN GOOGLE SHEETS
 # =======================================
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
 
-creds = Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=scope
-)
+def cargar_credenciales_google():
+    """Carga las credenciales desde la variable de entorno del secret."""
+    print("🔐 Cargando credenciales desde GOOGLE_CREDENTIALS...")
 
-gc = gspread.authorize(creds)
+    creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+    )
+    return gspread.authorize(creds)
+
+
+gc = cargar_credenciales_google()
 
 SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
-sh = gc.open_by_key(SPREADSHEET_ID)
-worksheet = sh.worksheet("results")
+worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet("results")
 
 
 # =======================================
-# DICCIONARIO DE MESES
+# DICCIONARIO MESES
 # =======================================
 MESES = {
     "ene.": "01", "feb.": "02", "mar.": "03", "abr.": "04",
     "may.": "05", "jun.": "06", "jul.": "07", "ago.": "08",
     "sep.": "09", "oct.": "10", "nov.": "11", "dic.": "12",
 }
+
 
 def corregir_fecha(fecha_str):
     for mes_abrev, mes_num in MESES.items():
@@ -71,23 +71,23 @@ def corregir_fecha(fecha_str):
 # =======================================
 def extraer_resultados_por_anio(anio):
     url = f"https://www.loterias.com/loto-3/resultados/{anio}"
-    print(f"🔎 Procesando año {anio} - URL: {url}")
+    print(f"🔎 Procesando año {anio}...")
 
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
     except Exception:
-        print(f"❌ Error obteniendo datos del año {anio}")
+        print(f"❌ Error al obtener datos del año {anio}")
         return pd.DataFrame()
 
     soup = BeautifulSoup(resp.text, "html.parser")
     tabla = soup.find("table", class_="archives")
 
     if not tabla:
-        print("❌ Tabla no encontrada")
         return pd.DataFrame()
 
     datos = []
+
     for fila in tabla.tbody.find_all("tr"):
         celdas = fila.find_all("td")
         if len(celdas) < 2:
@@ -104,9 +104,10 @@ def extraer_resultados_por_anio(anio):
             continue
 
         fecha_raw = " ".join(partes[1:])
+
         try:
             fecha = corregir_fecha(fecha_raw)
-        except Exception:
+        except:
             continue
 
         listas = celdas[1].find_all("ul", class_="balls")
@@ -147,7 +148,7 @@ def codificar_one_hot(y, num_classes=10):
 
 
 # =======================================
-# MODELO LSTM
+# MODELOS
 # =======================================
 def crear_modelo_lstm(seq_length, num_classes=10):
     model = Sequential([
@@ -159,9 +160,6 @@ def crear_modelo_lstm(seq_length, num_classes=10):
     return model
 
 
-# =======================================
-# MODELO TRANSFORMER
-# =======================================
 def crear_modelo_transformer(seq_length, num_classes=10, embed_dim=32, heads=2, ff_dim=64, dropout=0.1):
     inputs = Input(shape=(seq_length,), dtype="int32")
     x = Embedding(num_classes, embed_dim)(inputs)
@@ -180,7 +178,6 @@ def crear_modelo_transformer(seq_length, num_classes=10, embed_dim=32, heads=2, 
 
     model = Model(inputs, outputs)
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-
     return model
 
 
@@ -195,16 +192,10 @@ def ensemble_predict(preds_list):
 # =======================================
 # MONTE CARLO
 # =======================================
-def simulacion_monte_carlo_fast(modelos, entrada, num_simulaciones=5000, tipo='ensemble'):
-    if tipo == 'lstm':
-        probs = modelos[0].predict(entrada, verbose=0)[0]
-    elif tipo == 'transformer':
-        probs = modelos[0].predict(entrada, verbose=0)[0]
-    else:
-        p1 = modelos[0].predict(entrada, verbose=0)[0]
-        p2 = modelos[1].predict(entrada, verbose=0)[0]
-        probs = (p1 + p2) / 2
-
+def simulacion_monte_carlo_fast(modelos, entrada, num_simulaciones=5000):
+    p1 = modelos[0].predict(entrada, verbose=0)[0]
+    p2 = modelos[1].predict(entrada, verbose=0)[0]
+    probs = (p1 + p2) / 2
     return np.random.choice(np.arange(10), size=num_simulaciones, p=probs)
 
 
@@ -222,7 +213,7 @@ if __name__ == "__main__":
         if not df.empty:
             resultados = pd.concat([resultados, df], ignore_index=True)
 
-    print(f"\n🔔 Total resultados extraídos: {len(resultados)}")
+    print(f"🔔 Total resultados extraídos: {len(resultados)}")
 
     seq_length = 10
     X, y = preparar_datos_lstm(resultados, seq_length)
@@ -246,9 +237,7 @@ if __name__ == "__main__":
     modelo_trans.fit(X_train, y_train_cat, epochs=50, batch_size=64,
                      validation_data=(X_test, y_test_cat), verbose=0, callbacks=[es])
 
-    # =======================================
     # PREDICCIONES
-    # =======================================
     ultima_seq = resultados.sort_values("Fecha")["Último Número"].values[-seq_length:]
     entrada = np.array([ultima_seq])
 
@@ -258,37 +247,12 @@ if __name__ == "__main__":
     pred_clase, pred_prob = ensemble_predict([p_lstm, p_trans])
 
     # MONTE CARLO
-    resultados_mc = simulacion_monte_carlo_fast([modelo_lstm, modelo_trans], entrada, 5000, tipo='ensemble')
+    resultados_mc = simulacion_monte_carlo_fast([modelo_lstm, modelo_trans], entrada, 5000)
     conteo = pd.Series(resultados_mc).value_counts().sort_index()
     num_max = conteo.idxmax()
     prob_mc = conteo.max() / 5000.0
 
-    # =======================================
-    # IMPRESIÓN DETALLADA
-    # =======================================
-    print("\n=======================")
-    print("🔮  RESULTADOS DEL MODELO")
-    print("=======================\n")
-
-    print("📌 LSTM")
-    print(f"  • Número predicho: {int(np.argmax(p_lstm))}")
-    print(f"  • Probabilidad: {float(np.max(p_lstm)):.4f}\n")
-
-    print("📌 Transformer")
-    print(f"  • Número predicho: {int(np.argmax(p_trans))}")
-    print(f"  • Probabilidad: {float(np.max(p_trans)):.4f}\n")
-
-    print("📌 Ensamble (LSTM + Transformer)")
-    print(f"  • Predicción final: {int(pred_clase[0])}")
-    print(f"  • Probabilidad combinada: {float(pred_prob[0]):.4f}\n")
-
-    print("📌 Monte Carlo (5000 simulaciones)")
-    print(f"  • Número más frecuente: {num_max}")
-    print(f"  • Probabilidad estimada: {prob_mc:.4f}\n")
-
-    # =======================================
-    # APPEND A GOOGLE SHEETS
-    # =======================================
+    # APPEND A SHEETS
     print("📤 Enviando resultados a Google Sheets...")
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -304,4 +268,3 @@ if __name__ == "__main__":
     worksheet.append_row(fila, value_input_option="USER_ENTERED")
 
     print("✅ Google Sheets actualizado correctamente.")
-

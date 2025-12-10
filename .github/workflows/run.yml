@@ -2,9 +2,7 @@ name: Loto Predictor
 
 on:
   schedule:
-    - cron: "45 13 * * *"   # se ejecuta a las 13:45 UTC
-    - cron: "45 17 * * *"   # se ejecuta a las 17:45 UTC
-    - cron: "45 20 * * *"   # se ejecuta a las 20:45 UTC
+    - cron: "55 13 * * *"   # se ejecuta a las 13:55 UTC
   workflow_dispatch:         # permite lanzarlo manualmente
 
 jobs:

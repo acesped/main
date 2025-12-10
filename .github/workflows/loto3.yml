@@ -1,0 +1,41 @@
+# .github/workflows/loto3.yml
+name: Actualizar Loto 3
+
+on:
+  schedule:
+    # Se ejecuta a las 14:10, 18:10 y 21:10 UTC
+    - cron: "10 14 * * *"
+    - cron: "10 18 * * *"
+    - cron: "10 21 * * *"
+  workflow_dispatch:  # permite ejecutar manualmente
+
+jobs:
+  ejecutar-loto3:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Instalar dependencias
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Crear archivo de credenciales
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > creds.json
+          echo "Archivo creds.json generado"
+
+      - name: Ejecutar loto3.py
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          python loto3.py --creds creds.json

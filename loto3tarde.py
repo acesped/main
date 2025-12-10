@@ -13,7 +13,6 @@ from google.oauth2.service_account import Credentials
 # GOOGLE SHEETS
 # =======================================
 def cargar_credenciales_google():
-    print("🔐 Cargando credenciales desde GOOGLE_CREDENTIALS...")
     creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
     creds = Credentials.from_service_account_info(
         creds_dict,
@@ -28,7 +27,7 @@ SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
 gc = cargar_credenciales_google()
 
 # =======================================
-# SCRAPING ÚLTIMO SORTEO
+# SCRAPING ÚLTIMO SORTEO TARDE
 # =======================================
 MESES = {
     "ene.": "01", "feb.": "02", "mar.": "03", "abr.": "04",
@@ -56,26 +55,18 @@ def obtener_ultimo_sorteo_tarde():
     if not tabla:
         raise ValueError("No se encontró la tabla de resultados en la web")
 
-    fila = tabla.tbody.find("tr")
-    if not fila:
-        raise ValueError("No se encontraron sorteos en la tabla")
+    filas = tabla.tbody.find_all("tr")
+    for fila in filas:
+        celdas = fila.find_all("td")
+        if len(celdas) < 2:
+            continue
+        listas = celdas[1].find_all("ul", class_="balls")
+        if len(listas) >= 2:  # Necesitamos al menos Día y Tarde
+            # Extraemos los números Tarde (segundo set)
+            numeros_tarde = [int(li.text.strip()) for li in listas[1].find_all("li", class_="ball")]
+            return datetime.now(), numeros_tarde  # Fecha/hora de ejecución
 
-    celdas = fila.find_all("td")
-    if len(celdas) < 2:
-        raise ValueError("Formato de fila inesperado")
-
-    # Fecha del sorteo
-    enlace = celdas[0].find("a")
-    texto_fecha = enlace.get_text(separator=" ").strip()
-    partes = texto_fecha.split()
-    fecha_raw = " ".join(partes[1:])
-    fecha = corregir_fecha(fecha_raw)
-
-    # Números del sorteo Tarde (índice 1)
-    lista_tarde = celdas[1].find_all("ul", class_="balls")[1]
-    numeros_tarde = [int(li.text.strip()) for li in lista_tarde.find_all("li", class_="ball")]
-
-    return fecha, numeros_tarde
+    raise ValueError("No se encontraron números del sorteo Tarde en las filas disponibles")
 
 # =======================================
 # APPEND A GOOGLE SHEETS
@@ -85,13 +76,11 @@ def append_ultimo_sorteo(worksheet_name, numeros):
     fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     registros = worksheet.get_all_values()
-
-    # Crear encabezado si no existe
     if len(registros) == 0:
         worksheet.append_row(["FechaHora", "Num1", "Num2", "Num3"], value_input_option="USER_ENTERED")
         registros = worksheet.get_all_values()
 
-    # Evitamos duplicados comparando fecha/hora de ejecución
+    # Evitamos duplicados
     for fila in registros[1:]:
         if fila[0] == fecha_hora:
             print(f"⚠️ Sorteo ya registrado en {worksheet_name}.")
@@ -105,6 +94,9 @@ def append_ultimo_sorteo(worksheet_name, numeros):
 # MAIN
 # =======================================
 if __name__ == "__main__":
-    print("🔎 Obteniendo últimos números del Loto 3 Tarde...")
-    fecha, numeros_tarde = obtener_ultimo_sorteo_tarde()
-    append_ultimo_sorteo("loto3_tarde", numeros_tarde)
+    try:
+        print("🔎 Obteniendo últimos números del Loto 3 Tarde...")
+        fecha, numeros_tarde = obtener_ultimo_sorteo_tarde()
+        append_ultimo_sorteo("loto3_tarde", numeros_tarde)
+    except Exception as e:
+        print("❌ Error al obtener o registrar el sorteo Tarde:", str(e))

@@ -13,7 +13,6 @@ from google.oauth2.service_account import Credentials
 # GOOGLE SHEETS
 # =======================================
 def cargar_credenciales_google():
-    print("🔐 Cargando credenciales desde GOOGLE_CREDENTIALS...")
     creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
     creds = Credentials.from_service_account_info(
         creds_dict,
@@ -56,21 +55,19 @@ def obtener_ultimo_sorteo_noche():
     if not tabla:
         raise ValueError("No se encontró la tabla de resultados en la web")
 
-    fila = tabla.tbody.find("tr")
-    if not fila:
-        raise ValueError("No se encontraron sorteos en la tabla")
+    # Buscamos la **última fila que tenga 3 sets de números**
+    filas = tabla.tbody.find_all("tr")
+    for fila in filas:
+        celdas = fila.find_all("td")
+        if len(celdas) < 2:
+            continue
+        listas = celdas[1].find_all("ul", class_="balls")
+        if len(listas) >= 3:
+            # Extraemos los números Noche (tercer set)
+            numeros_noche = [int(li.text.strip()) for li in listas[2].find_all("li", class_="ball")]
+            return datetime.now(), numeros_noche  # Fecha/hora de ejecución
 
-    celdas = fila.find_all("td")
-    if len(celdas) < 2:
-        raise ValueError("Formato de fila inesperado")
-
-    listas = celdas[1].find_all("ul", class_="balls")
-    if len(listas) < 3:
-        raise ValueError("No se encontraron los números del sorteo Noche en el último registro")
-
-    numeros_noche = [int(li.text.strip()) for li in listas[2].find_all("li", class_="ball")]
-
-    return datetime.now(), numeros_noche  # Fecha/hora de ejecución
+    raise ValueError("No se encontraron números del sorteo Noche en las filas disponibles")
 
 # =======================================
 # APPEND A GOOGLE SHEETS
@@ -79,15 +76,12 @@ def append_ultimo_sorteo(worksheet_name, numeros):
     worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet(worksheet_name)
     fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Obtenemos todos los valores existentes
     registros = worksheet.get_all_values()
-
-    # Crear encabezado si no existe
     if len(registros) == 0:
         worksheet.append_row(["FechaHora", "Num1", "Num2", "Num3"], value_input_option="USER_ENTERED")
         registros = worksheet.get_all_values()
 
-    # Evitamos duplicados comparando fecha/hora de ejecución
+    # Evitamos duplicados
     for fila in registros[1:]:
         if fila[0] == fecha_hora:
             print(f"⚠️ Sorteo ya registrado en {worksheet_name}.")

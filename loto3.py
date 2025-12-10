@@ -24,7 +24,6 @@ def cargar_credenciales_google():
     )
     return gspread.authorize(creds)
 
-# ID del spreadsheet y hoja
 SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
 SHEET_NAME = "loto3"
 
@@ -60,7 +59,6 @@ def obtener_ultimo_sorteo():
     if not tabla:
         raise ValueError("No se encontró la tabla de resultados en la web")
 
-    # Tomamos la primera fila disponible
     fila = tabla.tbody.find("tr")
     if not fila:
         raise ValueError("No se encontraron sorteos en la tabla")
@@ -69,14 +67,12 @@ def obtener_ultimo_sorteo():
     if len(celdas) < 2:
         raise ValueError("Formato de fila inesperado")
 
-    # Fecha
     enlace = celdas[0].find("a")
     texto_fecha = enlace.get_text(separator=" ").strip()
     partes = texto_fecha.split()
     fecha_raw = " ".join(partes[1:])
     fecha = corregir_fecha(fecha_raw)
 
-    # Números
     lista = celdas[1].find("ul", class_="balls")
     if not lista:
         raise ValueError("No se encontró la lista de números")
@@ -90,17 +86,23 @@ def obtener_ultimo_sorteo():
 # APPEND A GOOGLE SHEETS
 # =======================================
 def append_ultimo_sorteo(worksheet, fecha_sorteo, numeros):
-    # Fecha y hora de ejecución
     fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Leemos registros existentes
-    registros = worksheet.get_all_records(expected_headers=["FechaHora","Num1","Num2","Num3"])
-    for fila in registros:
-        if fila.get("FechaHora") == fecha_hora:
+    # Obtenemos todos los valores existentes
+    registros = worksheet.get_all_values()
+
+    # Crear encabezado si no existe
+    if len(registros) == 0:
+        worksheet.append_row(["FechaHora", "Num1", "Num2", "Num3"], value_input_option="USER_ENTERED")
+        registros = worksheet.get_all_values()
+
+    # Evitamos duplicados comparando fecha/hora de ejecución
+    for fila in registros[1:]:  # saltamos encabezado
+        if fila[0] == fecha_hora:
             print("⚠️ Sorteo ya registrado en esta hora.")
             return
 
-    # Agregamos nueva fila: columna A = fecha/hora de ejecución, columnas B-D = números
+    # Append nueva fila
     fila = [fecha_hora, numeros[0], numeros[1], numeros[2]]
     worksheet.append_row(fila, value_input_option="USER_ENTERED")
     print("✅ Últimos números obtenidos:", numeros, "Fecha/hora:", fecha_hora)

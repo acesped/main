@@ -32,5 +32,7 @@ jobs:
           echo "Archivo creds.json generado"
 
       - name: Ejecutar script
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
           python main.py --creds creds.json

@@ -1,7 +1,0 @@
-numpy
-pandas
-tensorflow==2.15.0
-google-api-python-client
-gspread
-oauth2client
-scikit-learn

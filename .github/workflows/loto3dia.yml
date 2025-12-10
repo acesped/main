@@ -38,4 +38,4 @@ jobs:
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
-          python loto3.py --creds creds.json
+          python loto3dia.py --creds creds.json

@@ -1,9 +1,4 @@
 # =======================================
-# INSTALACIÓN DE LIBRERÍAS
-# =======================================
-!pip install requests beautifulsoup4 pandas tensorflow scikit-learn gspread
-
-# =======================================
 # INTEGRACIÓN CON GOOGLE DRIVE
 # =======================================
 from google.colab import drive
@@ -309,3 +304,4 @@ if __name__ == "__main__":
     worksheet.append_row(fila, value_input_option="USER_ENTERED")
 
     print("✅ Google Sheets actualizado correctamente.")
+

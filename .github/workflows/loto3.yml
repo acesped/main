@@ -1,13 +1,13 @@
-# .github/workflows/loto3.yml
-name: Loto3 Results
+# .github/workflows/loto3dia.yml
+name: Loto3dia Results
 
 on:
   schedule:
-    # Horario de verano CL (UTC-3): 21:30 CL = 00:30 UTC
-    - cron: "30 0 * 10-3 *"   # octubre a marzo
-    # Horario de invierno CL (UTC-4): 21:30 CL = 01:30 UTC
-    - cron: "30 1 * 4-9 *"    # abril a septiembre
-  workflow_dispatch:           # permite ejecutar manualmente
+    # Horario verano CL (UTC-3): octubre a marzo
+    - cron: "15 17 * 10-12,1-3 *"   # 14:15 CL
+    # Horario invierno CL (UTC-4): abril a septiembre
+    - cron: "15 18 * 4-9 *"          # 14:15 CL
+  workflow_dispatch:                 # permite ejecutar manualmente
 
 jobs:
   ejecutar-loto3:

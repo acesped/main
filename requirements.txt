@@ -4,10 +4,11 @@ pandas
 tensorflow
 scikit-learn
 gspread
+oauth2client
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
-gspread-formatting
+gspread_formatting
 numpy
 pandas
 tensorflow==2.15.0
@@ -15,4 +16,5 @@ google-api-python-client
 gspread
 oauth2client
 scikit-learn
+
 

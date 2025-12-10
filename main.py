@@ -15,8 +15,6 @@ from tensorflow.keras.layers import (
     Dropout, MultiHeadAttention, GlobalAveragePooling1D
 )
 from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.callbacks import EarlyStopping
-from sklearn.model_selection import train_test_split
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -25,9 +23,7 @@ from google.oauth2.service_account import Credentials
 # =======================================
 # AUTORIZACIÓN GOOGLE SHEETS
 # =======================================
-
 def cargar_credenciales_google():
-    """Carga las credenciales desde la variable de entorno del secret."""
     print("🔐 Cargando credenciales desde GOOGLE_CREDENTIALS...")
 
     creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
@@ -43,7 +39,6 @@ def cargar_credenciales_google():
 
 
 gc = cargar_credenciales_google()
-
 SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
 worksheet = gc.open_by_key(SPREADSHEET_ID).worksheet("results")
 
@@ -56,7 +51,6 @@ MESES = {
     "may.": "05", "jun.": "06", "jul.": "07", "ago.": "08",
     "sep.": "09", "oct.": "10", "nov.": "11", "dic.": "12",
 }
-
 
 def corregir_fecha(fecha_str):
     for mes_abrev, mes_num in MESES.items():
@@ -76,7 +70,7 @@ def extraer_resultados_por_anio(anio):
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
-    except Exception:
+    except:
         print(f"❌ Error al obtener datos del año {anio}")
         return pd.DataFrame()
 
@@ -87,7 +81,6 @@ def extraer_resultados_por_anio(anio):
         return pd.DataFrame()
 
     datos = []
-
     for fila in tabla.tbody.find_all("tr"):
         celdas = fila.find_all("td")
         if len(celdas) < 2:
@@ -143,12 +136,8 @@ def preparar_datos_lstm(df, seq_length=10):
     return np.array(X), np.array(y)
 
 
-def codificar_one_hot(y, num_classes=10):
-    return to_categorical(y, num_classes=num_classes)
-
-
 # =======================================
-# MODELOS
+# MODELOS SIN ENTRENAR (SE CARGAN PESOS)
 # =======================================
 def crear_modelo_lstm(seq_length, num_classes=10):
     model = Sequential([
@@ -156,7 +145,7 @@ def crear_modelo_lstm(seq_length, num_classes=10):
         LSTM(64),
         Dense(num_classes, activation='softmax')
     ])
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
     return model
 
 
@@ -165,19 +154,17 @@ def crear_modelo_transformer(seq_length, num_classes=10, embed_dim=32, heads=2, 
     x = Embedding(num_classes, embed_dim)(inputs)
 
     attn = MultiHeadAttention(num_heads=heads, key_dim=embed_dim)(x, x)
-    attn = Dropout(dropout)(attn)
     out1 = LayerNormalization(epsilon=1e-6)(x + attn)
 
     ff = Dense(ff_dim, activation="relu")(out1)
     ff = Dense(embed_dim)(ff)
-    ff = Dropout(dropout)(ff)
     out2 = LayerNormalization(epsilon=1e-6)(out1 + ff)
 
     x = GlobalAveragePooling1D()(out2)
     outputs = Dense(num_classes, activation="softmax")(x)
 
     model = Model(inputs, outputs)
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
+    model.compile(optimizer="adam", loss="categorical_crossentropy")
     return model
 
 
@@ -217,42 +204,33 @@ if __name__ == "__main__":
 
     seq_length = 10
     X, y = preparar_datos_lstm(resultados, seq_length)
-    num_classes = 10
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-    y_train_cat = codificar_one_hot(y_train)
-    y_test_cat = codificar_one_hot(y_test)
-
-    es = EarlyStopping(patience=5, restore_best_weights=True, monitor='val_loss')
-
-    # LSTM
-    print("\n⚙️ Entrenando LSTM...")
-    modelo_lstm = crear_modelo_lstm(seq_length)
-    modelo_lstm.fit(X_train, y_train_cat, epochs=50, batch_size=64,
-                    validation_data=(X_test, y_test_cat), verbose=0, callbacks=[es])
-
-    # TRANSFORMER
-    print("\n⚙️ Entrenando Transformer...")
-    modelo_trans = crear_modelo_transformer(seq_length)
-    modelo_trans.fit(X_train, y_train_cat, epochs=50, batch_size=64,
-                     validation_data=(X_test, y_test_cat), verbose=0, callbacks=[es])
-
-    # PREDICCIONES
     ultima_seq = resultados.sort_values("Fecha")["Último Número"].values[-seq_length:]
     entrada = np.array([ultima_seq])
 
+    # ========== CARGA DE MODELOS PRE-ENTRENADOS ==========
+    print("📥 Cargando pesos pre-entrenados...")
+
+    modelo_lstm = crear_modelo_lstm(seq_length)
+    modelo_lstm.load_weights("weights_lstm.h5")
+
+    modelo_trans = crear_modelo_transformer(seq_length)
+    modelo_trans.load_weights("weights_trans.h5")
+
+    print("✅ Modelos cargados correctamente.")
+
+    # ================= PREDICCIONES ======================
     p_lstm = modelo_lstm.predict(entrada, verbose=0)
     p_trans = modelo_trans.predict(entrada, verbose=0)
 
     pred_clase, pred_prob = ensemble_predict([p_lstm, p_trans])
 
-    # MONTE CARLO
+    # Monte Carlo
     resultados_mc = simulacion_monte_carlo_fast([modelo_lstm, modelo_trans], entrada, 5000)
     conteo = pd.Series(resultados_mc).value_counts().sort_index()
     num_max = conteo.idxmax()
     prob_mc = conteo.max() / 5000.0
 
-    # APPEND A SHEETS
+    # ================= GUARDAR EN GOOGLE SHEETS =================
     print("📤 Enviando resultados a Google Sheets...")
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

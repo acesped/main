@@ -28,7 +28,7 @@ SPREADSHEET_ID = "1QYwk8uKydO-xp0QALkh0pVVFmt50jnvU_BwZdRghES0"
 gc = cargar_credenciales_google()
 
 # =======================================
-# SCRAPING ÚLTIMO SORTEO
+# SCRAPING ÚLTIMO SORTEO NOCHE
 # =======================================
 MESES = {
     "ene.": "01", "feb.": "02", "mar.": "03", "abr.": "04",
@@ -64,18 +64,13 @@ def obtener_ultimo_sorteo_noche():
     if len(celdas) < 2:
         raise ValueError("Formato de fila inesperado")
 
-    # Fecha del sorteo
-    enlace = celdas[0].find("a")
-    texto_fecha = enlace.get_text(separator=" ").strip()
-    partes = texto_fecha.split()
-    fecha_raw = " ".join(partes[1:])
-    fecha = corregir_fecha(fecha_raw)
+    listas = celdas[1].find_all("ul", class_="balls")
+    if len(listas) < 3:
+        raise ValueError("No se encontraron los números del sorteo Noche en el último registro")
 
-    # Números del sorteo Noche (tercera lista)
-    lista_noche = celdas[1].find_all("ul", class_="balls")[2]
-    numeros_noche = [int(li.text.strip()) for li in lista_noche.find_all("li", class_="ball")]
+    numeros_noche = [int(li.text.strip()) for li in listas[2].find_all("li", class_="ball")]
 
-    return fecha, numeros_noche
+    return datetime.now(), numeros_noche  # Fecha/hora de ejecución
 
 # =======================================
 # APPEND A GOOGLE SHEETS
@@ -106,6 +101,9 @@ def append_ultimo_sorteo(worksheet_name, numeros):
 # MAIN
 # =======================================
 if __name__ == "__main__":
-    print("🔎 Obteniendo últimos números del Loto 3 Noche...")
-    fecha, numeros_noche = obtener_ultimo_sorteo_noche()
-    append_ultimo_sorteo("loto3_noche", numeros_noche)
+    try:
+        print("🔎 Obteniendo últimos números del Loto 3 Noche...")
+        fecha, numeros_noche = obtener_ultimo_sorteo_noche()
+        append_ultimo_sorteo("loto3_noche", numeros_noche)
+    except Exception as e:
+        print("❌ Error al obtener o registrar el sorteo Noche:", str(e))

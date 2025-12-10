@@ -1,13 +1,13 @@
 # .github/workflows/loto3.yml
-name: Loto Results
+name: Loto3 Results
 
 on:
   schedule:
-    # Se ejecuta a las 14:10, 18:10 y 21:10 UTC
-    - cron: "10 14 * * *"
-    - cron: "10 18 * * *"
-    - cron: "10 21 * * *"
-  workflow_dispatch:  # permite ejecutar manualmente
+    # Horario de verano CL (UTC-3): 21:30 CL = 00:30 UTC
+    - cron: "30 0 * 10-3 *"   # octubre a marzo
+    # Horario de invierno CL (UTC-4): 21:30 CL = 01:30 UTC
+    - cron: "30 1 * 4-9 *"    # abril a septiembre
+  workflow_dispatch:           # permite ejecutar manualmente
 
 jobs:
   ejecutar-loto3:

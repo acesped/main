@@ -71,16 +71,11 @@ def obtener_ultimo_sorteo():
     fecha_raw = " ".join(partes[1:])
     fecha = corregir_fecha(fecha_raw)
 
-    # Números de los sorteos: Día, Tarde, Noche
-    listas = celdas[1].find_all("ul", class_="balls")
-    if not listas or len(listas) < 3:
-        raise ValueError("No se pudieron extraer los 3 números del sorteo")
+    # Números del sorteo Día
+    lista_dia = celdas[1].find_all("ul", class_="balls")[0]
+    numeros_dia = [int(li.text.strip()) for li in lista_dia.find_all("li", class_="ball")]
 
-    numeros_dia = [int(li.text.strip()) for li in listas[0].find_all("li", class_="ball")]
-    numeros_tarde = [int(li.text.strip()) for li in listas[1].find_all("li", class_="ball")]
-    numeros_noche = [int(li.text.strip()) for li in listas[2].find_all("li", class_="ball")]
-
-    return fecha, numeros_dia, numeros_tarde, numeros_noche
+    return fecha, numeros_dia
 
 # =======================================
 # APPEND A GOOGLE SHEETS
@@ -111,9 +106,6 @@ def append_ultimo_sorteo(worksheet_name, numeros):
 # MAIN
 # =======================================
 if __name__ == "__main__":
-    print("🔎 Obteniendo últimos números del Loto 3...")
-    fecha, numeros_dia, numeros_tarde, numeros_noche = obtener_ultimo_sorteo()
-
+    print("🔎 Obteniendo últimos números del Loto 3 Día...")
+    fecha, numeros_dia = obtener_ultimo_sorteo()
     append_ultimo_sorteo("loto3_dia", numeros_dia)
-    append_ultimo_sorteo("loto3_tarde", numeros_tarde)
-    append_ultimo_sorteo("loto3_noche", numeros_noche)

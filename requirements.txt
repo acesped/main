@@ -1,3 +1,13 @@
+requests
+beautifulsoup4
+pandas
+tensorflow
+scikit-learn
+gspread
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+gspread-formatting
 numpy
 pandas
 tensorflow==2.15.0
@@ -5,3 +15,4 @@ google-api-python-client
 gspread
 oauth2client
 scikit-learn
+

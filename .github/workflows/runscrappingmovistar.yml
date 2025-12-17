@@ -25,4 +25,4 @@ jobs:
       - name: Ejecutar scraper
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python movistar_scraper.py
+        run: python scrapmovistar.py

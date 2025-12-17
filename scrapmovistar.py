@@ -1,6 +1,6 @@
 # ============================================================
 # MOVISTAR CHILE – SCRAPING + GOOGLE SHEETS + ALERTAS
-# Adaptado para GitHub Actions
+# Adaptado para GitHub Actions usando secrets
 # ============================================================
 
 import asyncio
@@ -13,27 +13,33 @@ from email.mime.multipart import MIMEMultipart
 from playwright.async_api import async_playwright
 import gspread
 from google.oauth2.service_account import Credentials
+import os
+import json
 
 # ---------------------------
-# CONFIG GOOGLE SHEETS
+# CONFIG
 # ---------------------------
-CREDENTIALS_PATH = "service_account.json"  # sube este archivo al repo
 SPREADSHEET_ID = "1vDRY9ugCjZaj-AGkU9jbw7LdvcypzZ8RsLdfqAgt4Yw"
 SHEET_LATEST = "latest"
 SHEET_PAST = "past"
-
 HEADERS = ["timestamp","sku","producto","precio_oferta","marca"]
 CL_TZ = pytz.timezone("America/Santiago")
 
-creds = Credentials.from_service_account_file(
-    CREDENTIALS_PATH,
-    scopes=[
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-)
+# ---------------------------
+# CARGA DE CREDENCIALES DESDE SECRET
+# ---------------------------
+def cargar_credenciales_google():
+    creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+    )
+    return gspread.authorize(creds)
 
-gc = gspread.authorize(creds)
+gc = cargar_credenciales_google()
 spreadsheet = gc.open_by_key(SPREADSHEET_ID)
 ws_latest = spreadsheet.worksheet(SHEET_LATEST)
 ws_past = spreadsheet.worksheet(SHEET_PAST)
@@ -88,18 +94,17 @@ async def scrape_movistar():
 # ---------------------------
 # EJECUCIÓN
 # ---------------------------
-df_new = asyncio.get_event_loop().run_until_complete(scrape_movistar())
-
-# Copiar df_new a 'past' (última publicación) y actualizar 'latest'
-overwrite_sheet_with_current_time(ws_past, df_new)
-overwrite_sheet_with_current_time(ws_latest, df_new)
+df_latest = asyncio.get_event_loop().run_until_complete(scrape_movistar())
+overwrite_sheet_with_current_time(ws_latest, df_latest)
+overwrite_sheet_with_current_time(ws_past, df_latest)
+print("✅ Hoja 'latest' y 'past' inicializadas con timestamp actual")
 
 # ---------------------------
-# ALERTAS DE PRECIO
+# COMPARACIÓN Y ALERTAS
 # ---------------------------
 try:
     df_old = pd.DataFrame(ws_past.get_all_records())
-    merged = df_old.merge(df_new, on="sku", suffixes=("_old","_new"))
+    merged = df_old.merge(df_latest, on="sku", suffixes=("_old","_new"))
     changes = merged[merged["precio_oferta_old"] != merged["precio_oferta_new"]]
 
     for _, row in changes.iterrows():
@@ -125,6 +130,7 @@ try:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
                 server.login(sender_email, password)
                 server.sendmail(sender_email, receiver_email, message.as_string())
+            print(f"📧 Alerta enviada: {row['producto_old']} ({diff_pct*100:.1f}%)")
 
 except Exception as e:
     print("❌ Error procesando alertas:", e)
